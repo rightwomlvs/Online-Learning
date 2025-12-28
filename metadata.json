@@ -1,5 +1,5 @@
 {
-  "name": "Chronos Digital Observation Dashboard",
-  "description": "A sophisticated classroom observation tool for teachers, featuring real-time timing, behavioral tracking, and engagement monitoring with a Gustav Klimt-inspired aesthetic.",
+  "name": "Chronos 數位觀課儀表板 (Single File Edition)",
+  "description": "這是一個完全獨立的單一 HTML 檔案觀課工具，專為中學教師設計。整合計時、行為追蹤、專注度提醒及詳細報告匯出功能，並採用克林姆（Gustav Klimt）幾何藝術風格設計。",
   "requestFramePermissions": []
 }
