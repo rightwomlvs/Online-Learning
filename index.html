@@ -4,8 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chronos 數位觀課儀表板</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
     <style>
         body {
             font-family: 'Noto Sans TC', sans-serif;
@@ -48,18 +55,382 @@
             -webkit-user-select: none;
         }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/"
-  }
-}
-</script>
 </head>
 <body class="no-select">
     <div id="root"></div>
-    <script type="module" src="index.tsx"></script>
+
+    <script type="text/babel" data-presets="react,typescript">
+        
+        // 從全域變數取得 React 功能 (取代 import)
+        const { useState, useEffect, useCallback, useRef } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- Constants ---
+        const SUBJECTS = ['國文', '英文', '數學', '自然', '社會', '體育', '藝術', '綜合'];
+        const MODES = [
+          { id: 'lecture', label: '講述教學' },
+          { id: 'discussion', label: '小組討論' },
+          { id: 'practice', label: '實作/演算' },
+          { id: 'digital', label: '數位運用' }
+        ];
+
+        const ACTIONS = [
+          { id: 'praise', label: '正向鼓勵' },
+          { id: 'correction', label: '糾正規範' },
+          { id: 'open_q', label: '開放提問' },
+          { id: 'closed_q', label: '封閉提問' },
+          { id: 'walking', label: '巡視走動' }
+        ];
+
+        const ENGAGEMENT_REMINDER_INTERVAL = 5 * 60 * 1000;
+
+        // --- Icons ---
+        const StartIcon = () => (
+          <div className="relative w-14 h-14 flex items-center justify-center">
+            <svg className="absolute w-full h-full rotating" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="46" fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="6 4" opacity="0.4" />
+            </svg>
+            <div className="z-10 bg-amber-500 w-10 h-10 rounded-full flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <svg className="w-5 h-5 ml-1" viewBox="0 0 24 24" fill="white">
+                <path d="M5 3l14 9-14 9V3z" />
+              </svg>
+            </div>
+          </div>
+        );
+
+        const StopIcon = () => (
+          <div className="relative w-14 h-14 flex items-center justify-center">
+            <svg className="absolute w-full h-full" viewBox="0 0 100 100">
+              <rect x="10" y="10" width="80" height="80" fill="none" stroke="#ef4444" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
+            </svg>
+            <div className="z-10 bg-red-600 w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shadow-red-600/20">
+              <rect x="4" y="4" width="16" height="16" fill="white" />
+            </div>
+          </div>
+        );
+
+        // --- Report Modal ---
+        const ReportModal = ({ state, onClose, formatSeconds }) => {
+          const getFullReportText = () => {
+            let text = `Chronos 數位觀課儀表板 - 總結報告\n`;
+            text += `====================================\n`;
+            text += `科目: ${state.subject}\n`;
+            text += `觀課日期: ${new Date().toLocaleDateString('zh-TW')}\n`;
+            text += `匯出時間: ${new Date().toLocaleTimeString('zh-TW')}\n\n`;
+            
+            text += `[教學模式累計時長]\n`;
+            MODES.forEach(m => {
+              text += `- ${m.label.padEnd(8)}: ${formatSeconds(state.modeTimes[m.id])}\n`;
+            });
+            
+            text += `\n[教學行為數據統計]\n`;
+            ACTIONS.forEach(a => {
+              text += `- ${a.label.padEnd(8)}: ${state.actionCounts[a.id]} 次 | 累計時間: ${formatSeconds(state.actionTimes[a.id])}\n`;
+            });
+            
+            text += `\n[詳細觀課行為歷程]\n`;
+            text += `------------------------------------\n`;
+            [...state.logs].reverse().forEach(l => {
+              let logLine = `[${l.timestamp}] ${l.name}`;
+              if (l.value) logLine += ` | 狀態: ${l.value}`;
+              if (l.duration !== undefined) logLine += ` | 時長: ${formatSeconds(l.duration)}`;
+              text += `${logLine}\n`;
+            });
+            
+            text += `\n====================================\n`;
+            return text;
+          };
+
+          const handleDownload = () => {
+            const text = getFullReportText();
+            const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Chronos_Report_${state.subject}_${new Date().getTime()}.txt`;
+            link.click();
+          };
+
+          const handleCopy = () => {
+            navigator.clipboard.writeText(getFullReportText()).then(() => alert('已複製到剪貼簿'));
+          };
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+              <div className="bg-slate-900 border border-amber-500/20 rounded-[2.5rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+                <div className="p-8 border-b border-amber-500/10 flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-bold text-amber-500 tracking-tight">觀課結案報告</h2>
+                    <p className="text-[10px] text-amber-500/30 uppercase tracking-[0.3em] mt-1">Detailed Log Summary</p>
+                  </div>
+                  <button onClick={onClose} className="text-amber-500/30 hover:text-amber-500 text-2xl">✕</button>
+                </div>
+                
+                <div className="p-8 overflow-y-auto flex-1 space-y-8 scrollbar-hide">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <section className="space-y-4">
+                      <h3 className="text-[10px] font-bold text-amber-500/40 uppercase tracking-widest border-b border-amber-500/10 pb-2">模式時長分佈</h3>
+                      {MODES.map(m => (
+                        <div key={m.id} className="flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-amber-500/5">
+                          <span className="text-sm text-amber-500/70">{m.label}</span>
+                          <span className="font-mono text-amber-400 font-bold">{formatSeconds(state.modeTimes[m.id])}</span>
+                        </div>
+                      ))}
+                    </section>
+                    <section className="space-y-4">
+                      <h3 className="text-[10px] font-bold text-amber-500/40 uppercase tracking-widest border-b border-amber-500/10 pb-2">行為頻次計時</h3>
+                      {ACTIONS.map(a => (
+                        <div key={a.id} className="flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-amber-500/5">
+                          <span className="text-sm text-amber-500/70">{a.label}</span>
+                          <div className="text-right">
+                            <div className="text-sm font-bold text-amber-400">{state.actionCounts[a.id]} 次</div>
+                            <div className="text-[10px] text-amber-500/30 font-mono">{formatSeconds(state.actionTimes[a.id])}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  </div>
+                </div>
+                
+                <div className="p-8 bg-slate-950/40 flex gap-4 border-t border-amber-500/10">
+                  <button onClick={handleCopy} className="flex-1 py-4 bg-slate-800 hover:bg-slate-750 rounded-2xl text-amber-500 font-bold border border-amber-500/20">複製</button>
+                  <button onClick={handleDownload} className="flex-1 py-4 bg-amber-500 hover:bg-amber-400 rounded-2xl text-slate-950 font-bold">下載報告</button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // --- App Component ---
+        const App = () => {
+          const [state, setState] = useState({
+            isSessionActive: false,
+            activeMode: null,
+            modeTimes: { lecture: 0, discussion: 0, practice: 0, digital: 0 },
+            actionCounts: { praise: 0, correction: 0, open_q: 0, closed_q: 0, walking: 0 },
+            actionTimes: { praise: 0, correction: 0, open_q: 0, closed_q: 0, walking: 0 },
+            activeActions: [],
+            logs: [],
+            engagement: 'med',
+            subject: SUBJECTS[0],
+            lastInteraction: Date.now()
+          });
+
+          const [sysTime, setSysTime] = useState(new Date().toLocaleTimeString('zh-TW', { hour12: false }));
+          const [sessionDuration, setSessionDuration] = useState(0);
+          const [showReport, setShowReport] = useState(false);
+          const [noteInput, setNoteInput] = useState('');
+          const [isReminderFlashing, setIsReminderFlashing] = useState(false);
+
+          const tickerRef = useRef(null);
+          const longPressTimerRef = useRef({});
+
+          const formatSeconds = (ts) => {
+            const m = Math.floor(ts / 60);
+            const s = ts % 60;
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+          };
+
+          const addLog = useCallback((type, name, value, duration) => {
+            const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            setState(prev => ({
+              ...prev,
+              logs: [{ id: Math.random().toString(36).substr(2, 9), timestamp: timeStr, type, name, value, duration }, ...prev.logs].slice(0, 300),
+              lastInteraction: Date.now()
+            }));
+          }, []);
+
+          useEffect(() => {
+            const clock = setInterval(() => {
+              setSysTime(new Date().toLocaleTimeString('zh-TW', { hour12: false }));
+              if (state.isSessionActive && Date.now() - state.lastInteraction > ENGAGEMENT_REMINDER_INTERVAL) {
+                setIsReminderFlashing(true);
+              } else {
+                setIsReminderFlashing(false);
+              }
+            }, 1000);
+            return () => clearInterval(clock);
+          }, [state.isSessionActive, state.lastInteraction]);
+
+          useEffect(() => {
+            if (state.isSessionActive) {
+              tickerRef.current = setInterval(() => {
+                setSessionDuration(prev => prev + 1);
+                setState(prev => {
+                  const newModeTimes = { ...prev.modeTimes };
+                  const newActionTimes = { ...prev.actionTimes };
+                  if (prev.activeMode) newModeTimes[prev.activeMode] += 1;
+                  prev.activeActions.forEach(id => newActionTimes[id] += 1);
+                  return { ...prev, modeTimes: newModeTimes, actionTimes: newActionTimes };
+                });
+              }, 1000);
+            } else {
+              clearInterval(tickerRef.current);
+            }
+            return () => clearInterval(tickerRef.current);
+          }, [state.isSessionActive]);
+
+          const toggleSession = () => {
+            if (!state.isSessionActive) {
+              setState(prev => ({ ...prev, isSessionActive: true, lastInteraction: Date.now(), logs: [], 
+                modeTimes: { lecture: 0, discussion: 0, practice: 0, digital: 0 }, 
+                actionCounts: { praise: 0, correction: 0, open_q: 0, closed_q: 0, walking: 0 }, 
+                actionTimes: { praise: 0, correction: 0, open_q: 0, closed_q: 0, walking: 0 }, 
+                activeActions: [] 
+              }));
+              setSessionDuration(0);
+              addLog('session', '--- 觀課開始 ---');
+            } else {
+              addLog('session', '--- 觀課結束 ---', `總時長: ${formatSeconds(sessionDuration)}`);
+              setState(prev => ({ ...prev, isSessionActive: false, activeMode: null, activeActions: [] }));
+              setShowReport(true);
+            }
+          };
+
+          const handleActionInteraction = (actionId, type) => {
+            if (!state.isSessionActive) return;
+            const action = ACTIONS.find(a => a.id === actionId);
+            if (type === 'start') {
+              longPressTimerRef.current[actionId] = setTimeout(() => {
+                const isTiming = state.activeActions.includes(actionId);
+                if (isTiming) {
+                  addLog('action_end', `${action?.label} 停止計時`);
+                  setState(prev => ({ ...prev, activeActions: prev.activeActions.filter(id => id !== actionId) }));
+                } else {
+                  addLog('action_start', `${action?.label} 開始計時`);
+                  setState(prev => ({ ...prev, activeActions: [...prev.activeActions, actionId] }));
+                }
+                longPressTimerRef.current[actionId] = null;
+              }, 600);
+            } else {
+              if (longPressTimerRef.current[actionId]) {
+                clearTimeout(longPressTimerRef.current[actionId]);
+                setState(prev => ({ 
+                  ...prev, 
+                  actionCounts: { ...prev.actionCounts, [actionId]: prev.actionCounts[actionId] + 1 }
+                }));
+                addLog('action_click', `${action?.label} (次數)`);
+                longPressTimerRef.current[actionId] = null;
+              }
+            }
+          };
+
+          return (
+            <div className="min-h-screen flex flex-col relative">
+              <div className="absolute inset-0 klimt-pattern pointer-events-none" />
+              <header className="glass sticky top-0 z-40 px-8 py-5 flex items-center justify-between">
+                <div className="flex items-center gap-6">
+                  <h1 className="text-2xl font-bold text-amber-500 tracking-tighter">CHRONOS</h1>
+                  <select 
+                    value={state.subject} 
+                    onChange={e => setState(p => ({...p, subject: e.target.value}))}
+                    className="bg-slate-900 border border-amber-500/20 rounded-xl px-3 py-1 text-sm text-amber-400"
+                    disabled={state.isSessionActive}
+                  >
+                    {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-8">
+                  <div className="text-right">
+                    <div className="text-2xl font-mono text-amber-400">{sysTime}</div>
+                    {state.isSessionActive && <div className="text-[10px] text-amber-500/40 uppercase">Duration: {formatSeconds(sessionDuration)}</div>}
+                  </div>
+                  <button onClick={toggleSession}>{state.isSessionActive ? <StopIcon /> : <StartIcon />}</button>
+                </div>
+              </header>
+
+              <main className="flex-1 p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 pb-36 max-w-[1440px] mx-auto w-full">
+                <section className="lg:col-span-3 space-y-6">
+                  <h2 className="text-[10px] font-bold text-amber-500/30 uppercase tracking-[0.3em] mb-4">教學模式</h2>
+                  <div className="grid gap-4">
+                    {MODES.map(mode => (
+                      <button 
+                        key={mode.id}
+                        onClick={() => state.isSessionActive && setState(p => ({...p, activeMode: p.activeMode === mode.id ? null : mode.id, lastInteraction: Date.now()}))}
+                        className={`p-6 rounded-3xl border text-left transition-all ${state.activeMode === mode.id ? 'bg-amber-500/10 border-amber-500 active-pulse' : 'bg-slate-900/40 border-amber-500/5'} ${!state.isSessionActive && 'opacity-20'}`}
+                      >
+                        <div className="text-xs font-bold text-amber-500/60 mb-1">{mode.label}</div>
+                        <div className="text-3xl font-mono font-light">{formatSeconds(state.modeTimes[mode.id])}</div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="lg:col-span-6 space-y-6">
+                  <h2 className="text-[10px] font-bold text-amber-500/30 uppercase tracking-[0.3em] mb-4">教學行為 (長按計時)</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+                    {ACTIONS.map(action => (
+                      <button 
+                        key={action.id}
+                        onMouseDown={() => handleActionInteraction(action.id, 'start')}
+                        onMouseUp={() => handleActionInteraction(action.id, 'end')}
+                        // 支援觸控裝置
+                        onTouchStart={() => handleActionInteraction(action.id, 'start')}
+                        onTouchEnd={() => handleActionInteraction(action.id, 'end')}
+                        className={`flex flex-col items-center justify-center p-8 rounded-[3rem] border aspect-square transition-all ${state.activeActions.includes(action.id) ? 'bg-amber-500/20 border-amber-400 active-pulse' : 'bg-slate-900/40 border-amber-500/5'} ${!state.isSessionActive && 'opacity-20'}`}
+                      >
+                        <div className="text-4xl font-bold mb-1">{state.actionCounts[action.id]}</div>
+                        <span className="text-[11px] font-bold text-amber-500/40">{action.label}</span>
+                        {state.actionTimes[action.id] > 0 && <div className="text-[9px] font-mono mt-2 opacity-30">{formatSeconds(state.actionTimes[action.id])}</div>}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="lg:col-span-3 space-y-6">
+                  <h2 className="text-[10px] font-bold text-amber-500/30 uppercase tracking-[0.3em] mb-4">紀錄歷程</h2>
+                  <div className="bg-slate-900/40 rounded-[2rem] border border-amber-500/5 h-[500px] overflow-y-auto p-6 space-y-4 scrollbar-hide">
+                    {state.logs.map(log => (
+                      <div key={log.id} className="border-l border-amber-500/20 pl-4 py-1">
+                        <div className="text-[9px] font-mono text-amber-500/30">{log.timestamp}</div>
+                        <div className="text-xs font-bold text-amber-500/80">{log.name}</div>
+                        {log.value && <div className="text-[10px] text-amber-500/40 italic">{log.value}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </main>
+
+              <footer className={`glass fixed bottom-0 left-0 right-0 z-40 p-5 flex flex-col md:flex-row gap-6 items-center ${isReminderFlashing ? 'bg-amber-500/20' : ''}`}>
+                <div className="flex gap-4 items-center">
+                  <span className="text-[10px] font-bold text-amber-500/40 tracking-widest">ENGAGEMENT</span>
+                  <div className="grid grid-cols-3 gap-2 w-48 h-10">
+                    {(['high', 'med', 'low']).map(l => (
+                      <button 
+                        key={l}
+                        onClick={() => state.isSessionActive && setState(p => ({...p, engagement: l, lastInteraction: Date.now()}))}
+                        className={`rounded-xl border text-[10px] font-bold ${state.engagement === l ? 'bg-amber-500 text-slate-950' : 'text-amber-500 border-amber-500/20'} ${!state.isSessionActive && 'opacity-20'}`}
+                      >
+                        {l.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 flex gap-2 w-full">
+                  <input 
+                    value={noteInput} 
+                    onChange={e => setNoteInput(e.target.value)}
+                    placeholder="輸入質性紀錄..."
+                    className="flex-1 bg-slate-950/60 border border-amber-500/10 rounded-2xl px-5 py-2 text-sm text-amber-100"
+                    disabled={!state.isSessionActive}
+                  />
+                  <button 
+                    onClick={() => { addLog('note', '質性紀錄', noteInput); setNoteInput(''); }}
+                    className="bg-amber-500 text-slate-950 p-3 rounded-2xl"
+                    disabled={!state.isSessionActive || !noteInput}
+                  >
+                    ✓
+                  </button>
+                </div>
+              </footer>
+
+              {showReport && <ReportModal state={state} onClose={() => setShowReport(false)} formatSeconds={formatSeconds} />}
+            </div>
+          );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
